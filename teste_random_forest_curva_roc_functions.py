@@ -48,24 +48,53 @@ def get_training_variables():
 
     return X, y, bands, src, polys
 
-def random_forest_trinig(X, y):
+def random_forest_trainig(X,y):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
 
-    rf = RandomForestClassifier(n_estimators=50, random_state=42)
+    rf = RandomForestClassifier(n_estimators=200, random_state=42)
 
     start_time = time.time()
     rf.fit(X_train, y_train)
     end_time = time.time()
     print(f'Tempo de treinamento: {end_time - start_time:.2f} segundos')
 
-    # y_pred = rf.predict(X_test)
-    # accuracy = accuracy_score(y_test, y_pred)
-    # print(f'Acurácia do modelo: {accuracy:.2f}')
+    y_pred = rf.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f'Acurácia do modelo: {accuracy:.2f}')
 
     y_pred_proba = rf.predict_proba(X_test)
     print("Probabilidades das classes:", y_pred_proba)
 
-    threshold = 0.5
+    unique, counts = np.unique(y_pred, return_counts=True)
+    print("Distribuição das previsões (classes):", dict(zip(unique, counts)))
+
+    y_test_bin = label_binarize(y_test, classes=np.unique(y))
+
+    if y_test_bin.shape[1] > 2:
+        y_pred_proba_bin = y_pred_proba
+    else:
+        y_pred_proba_bin = y_pred_proba[:, 1]
+
+    plot_roc(y_test_bin, y_pred_proba_bin, 'Random Forest')
+
+    plt.show()
+
+    return rf
+
+def random_forest_trainig_threshold(X, y):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+    rf = RandomForestClassifier(n_estimators=200, random_state=42)
+
+    start_time = time.time()
+    rf.fit(X_train, y_train)
+    end_time = time.time()
+    print(f'Tempo de treinamento: {end_time - start_time:.2f} segundos')
+
+    y_pred_proba = rf.predict_proba(X_test)
+    print("Probabilidades das classes:", y_pred_proba)
+
+    threshold = 0.9
 
     y_pred_thresholded = np.where(y_pred_proba[:, 1] >= threshold, 2, 1)
     print("Previsões com ponto de corte:", y_pred_thresholded)
@@ -73,7 +102,7 @@ def random_forest_trinig(X, y):
     unique, counts = np.unique(y_pred_thresholded, return_counts=True)
     print("Distribuição das previsões:", dict(zip(unique, counts)))
 
-    verify_matriz = matriz_de_confusao(y_test, y_pred_thresholded)
+    matriz_de_confusao(y_test, y_pred_thresholded)
 
     accuracy = accuracy_score(y_test, y_pred_thresholded)
     print(f'Acurácia do modelo com ponto de corte {threshold}: {accuracy:.2f}')
@@ -82,9 +111,9 @@ def random_forest_trinig(X, y):
     y_pred_bin = label_binarize(y_pred_thresholded, classes=np.unique(y))
 
     plot_roc(y_test_bin, y_pred_bin, 'Random Forest com Ponto de Corte')
+    plt.show()
 
     return rf
-    
     
 def random_forest_classify(rf, bands):
     start_time = time.time()
@@ -147,7 +176,7 @@ def validation_model_classification(raster_classified, ground_truth_raster):
     print("Classes previstas:", unique_pred_classes)
 
     plot_roc(y_test_bin, y_pred_bin, label)
-
+    plt.show()
 
     # if y_test_bin.shape[1] > 1:
     #     plot_roc(y_test_bin[:, 1], y_pred_bin[:, 1], 'Random Forest Final (Classes 1 e 2)')
@@ -164,7 +193,7 @@ def matriz_de_confusao(y_test, y_pred_thresholded):
     plt.xlabel('Classes Previstas')
     plt.ylabel('Classes Verdadeiras')
     plt.title('Matriz de Confusão')
-    plt.show()
+    
 
 
 def plot_roc(y_true, y_pred, label):
@@ -182,7 +211,8 @@ def plot_roc(y_true, y_pred, label):
 def main():
     X, y, bands, src, polys = get_training_variables()
 
-    rf = random_forest_trinig(X, y)
+    rf = random_forest_trainig(X,y)
+    # rf = random_forest_trainig_threshold(X, y)
 
     raster_classified = random_forest_classify(rf, bands)
 
@@ -190,8 +220,7 @@ def main():
 
     validation_model_classification(raster_classified, ground_truth_raster)
 
-
-    output_classified_path = 'random_forest_50_arvores_corte_05.tif'
+    output_classified_path = 'random_forest_200_arvores.tif'
     with rasterio.open(
         output_classified_path,
         'w',
@@ -205,19 +234,15 @@ def main():
     ) as dst:
         dst.write(raster_classified, 1)
 
-    # Converter o raster classificado para shapefile
-    output_polygons_shp_path = 'random_forest_50_arvores_corte_05.shp'
+    output_polygons_shp_path = 'random_forest_200_arvores.shp'
 
-    # Abrir a imagem classificada
     with rasterio.open(output_classified_path) as src:
         classified_array = src.read(1)
         transform = src.transform
 
-    # Criar um GeoDataFrame contendo os polígonos dos valores classificados
     shapes_gen = shapes(classified_array, transform=transform)
     records = [{'geometry': shape, 'properties': {'class': value}} for shape, value in shapes_gen]
 
-    # Salvar o GeoDataFrame como shapefile
     gdf = gpd.GeoDataFrame.from_features(records, crs=polys.crs)
     gdf.to_file(output_polygons_shp_path)
 
